@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0084ff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Room Chat">
+<title>Room Chat</title>
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+<script>
+// Always run over HTTPS (camera, microphone, notifications and the service worker all need it).
+(function () {
+  // If you wrap this page as an app (file://, app://, capacitor:// ...), put your hosted address here, e.g. 'https://my-chat.onrender.com/'
+  var HOSTED = '';
+  try {
+    var p = location.protocol, h = location.hostname;
+    var local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(h);
+    if (p === 'http:' && !local) { location.replace('https://' + location.host + location.pathname + location.search + location.hash); return; }
+    var localFile = /^(file|content):$/.test(p);
+    if ((window.isSecureContext && !localFile) || p === 'https:' || p === 'http:' || navigator.onLine === false) return;
+    // Running inside an app shell that is not a secure origin: load the hosted HTTPS copy instead.
+    var t = HOSTED;
+    if (!t) { try { t = (localStorage.getItem('ownServer') || '').split(/[\s,;]+/)[0] || ''; } catch (_) {} }
+    if (t && !/^https?:\/\//i.test(t)) t = 'https://' + t;
+    if (/^https:\/\//i.test(t)) location.replace(t.replace(/\/+$/, '') + '/index.html');
+  } catch (_) {}
+})();
+</script>
+<style>
+  :root {
+    --bg:#f0f2f5; --panel:#fff; --ink:#050505; --muted:#65676b; --line:#e4e6eb;
+    --acc:#0084ff; --acc2:#00c6ff; --acc-ink:#fff; --theirs:#e4e6eb; --seen:#0084ff;
+    --hover:#f2f2f2; --radius:18px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#000; --panel:#000; --ink:#e4e6eb; --muted:#8a8d91; --line:#262626;
+      --acc:#0084ff; --acc2:#2e9bff; --acc-ink:#fff; --theirs:#3a3b3c; --seen:#2e9bff;
+      --hover:#1c1c1e;
+    }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--ink); font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; display:flex; justify-content:center; }
+  .app { width:100%; max-width:600px; height:100%; display:flex; flex-direction:column; background:var(--panel); border-left:1px solid var(--line); border-right:1px solid var(--line); }
+  header { position:relative; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; box-shadow:0 1px 0 var(--line); z-index:2; }
+  .hdrR { display:flex; align-items:center; gap:6px; flex:none; }
+  #menuBtn { width:34px; height:34px; padding:0; font-size:1.3rem; line-height:1; background:var(--hover); color:var(--ink); border:0; border-radius:50%; display:grid; place-items:center; }
+  #menu { position:absolute; right:12px; top:100%; z-index:5; min-width:190px; padding:6px; background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:0 8px 28px rgba(0,0,0,.22); }
+  #menu button { width:100%; text-align:left; background:transparent; color:var(--ink); font-weight:500; border-radius:8px; padding:10px 12px; }
+  #menu button:hover { background:var(--hover); }
+  #menu #status { display:block; padding:10px 12px; margin-bottom:4px; border-bottom:1px solid var(--line); font:600 .82rem system-ui,sans-serif; }
+  #menu #status.on { color:var(--ink); }
+  #callBtn { width:34px; height:34px; padding:0; background:var(--hover); color:var(--acc); border:0; border-radius:50%; display:grid; place-items:center; }
+  #callBtn svg { display:block; }
+  #call { position:fixed; inset:0; z-index:30; background:#000; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
+  #call video { position:absolute; background:#000; }
+  #rv { inset:0; width:100%; height:100%; object-fit:cover; }
+  #lv { right:12px; top:calc(env(safe-area-inset-top,0px) + 70px); width:104px; height:140px; object-fit:cover; border-radius:14px; border:2px solid rgba(255,255,255,.35); background:#222; transform:scaleX(-1); z-index:2; }
+  #lv.back { transform:none; }
+  #lv.full { inset:0; width:100%; height:100%; border-radius:0; border:0; z-index:1; }
+  #callTop { position:absolute; top:0; left:0; right:0; padding:calc(env(safe-area-inset-top,0px) + 16px) 16px 24px; text-align:center; background:linear-gradient(rgba(0,0,0,.65),transparent); z-index:4; pointer-events:none; }
+  #callTop b { display:block; font-size:1.25rem; }
+  #callState { display:block; font-size:.9rem; opacity:.9; }
+  #modeSw { display:inline-flex; margin-top:10px; background:rgba(255,255,255,.2); border-radius:22px; padding:3px; pointer-events:auto; }
+  #modeSw button { padding:7px 16px; font-size:.85rem; font-weight:600; background:transparent; color:#fff; border-radius:18px; }
+  #modeSw button.on { background:#fff; color:#111; }
+  #callErr { display:flex; flex-direction:column; gap:8px; align-items:center; margin:12px auto 0; max-width:420px; padding:10px 14px; border-radius:14px; background:rgba(228,30,63,.92); font-size:.82rem; line-height:1.35; pointer-events:auto; }
+  #callErr button { padding:6px 16px; font-size:.82rem; background:#fff; color:#111; }
+  #rOff { position:absolute; inset:0; z-index:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:#111; font:.9rem system-ui,sans-serif; }
+  #rOff .avc { width:96px; height:96px; border-radius:50%; background:var(--acc); display:grid; place-items:center; font:700 2.4rem system-ui,sans-serif; }
+  #callIn, #callCtl { position:relative; z-index:3; display:flex; justify-content:center; gap:28px; padding:20px 16px max(28px,env(safe-area-inset-bottom)); width:100%; background:linear-gradient(transparent,rgba(0,0,0,.65)); }
+  .cw { display:flex; flex-direction:column; align-items:center; gap:6px; font:.78rem system-ui,sans-serif; }
+  .cbtn { width:58px; height:58px; padding:0; border-radius:50%; font-size:1.4rem; line-height:1; background:rgba(255,255,255,.22); color:#fff; border:0; display:grid; place-items:center; }
+  .cbtn.red { background:#e41e3f; } .cbtn.green { background:#31a24c; }
+  .cbtn.off { background:#fff; color:#111; }
+  h1 { font-size:1.5rem; margin:0; font-weight:800; letter-spacing:-.01em; }
+  #status { font:.78rem system-ui,sans-serif; color:var(--muted); }
+  #status::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:6px; }
+  #status.on::before { background:#31a24c; }
+  .screen { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:12px; }
+  p, label { margin:0; color:var(--muted); font-size:.92rem; }
+  input, select, button { font:inherit; }
+  input, select { width:100%; padding:11px 14px; border:1px solid transparent; border-radius:22px; background:var(--hover); color:var(--ink); }
+  input:focus, select:focus { outline:0; border-color:var(--acc); background:var(--panel); }
+  button { padding:10px 18px; border:0; border-radius:22px; background:var(--acc); color:var(--acc-ink); font-weight:700; cursor:pointer; transition:filter .12s; }
+  button:hover { filter:brightness(1.08); }
+  button:active { filter:brightness(.94); }
+  details { border:1px solid var(--line); border-radius:14px; padding:10px 14px; }
+  #chat { display:flex; flex-direction:column; flex:1; min-height:0; }
+  #messages { flex:1; overflow-y:auto; padding:16px 14px; display:flex; flex-direction:column; gap:6px; background:var(--panel); }
+  .msg { max-width:78%; padding:9px 14px; border-radius:var(--radius); background:var(--theirs); color:var(--ink); overflow-wrap:anywhere; font-size:.95rem; }
+  .msg.me { align-self:flex-end; background:linear-gradient(135deg,var(--acc),var(--acc2)); color:var(--acc-ink); }
+  .msg small { display:flex; justify-content:space-between; align-items:center; gap:12px; font:600 .7rem system-ui,sans-serif; opacity:.75; }
+  .sys { align-self:center; color:var(--muted); font:italic .82rem system-ui,sans-serif; text-align:center; }
+  #sendForm { display:flex; align-items:center; gap:8px; padding:10px 12px; border-top:1px solid var(--line); padding-bottom:max(10px,env(safe-area-inset-bottom)); background:var(--panel); }
+  #sendForm input { flex:1; padding:11px 16px; }
+  #attach { flex:none; width:40px; height:40px; padding:0; background:transparent; color:var(--acc); border:0; font-size:1.25rem; border-radius:50%; display:grid; place-items:center; }
+  #attach:hover { background:var(--hover); }
+  #sendForm > button:not(#attach) { flex:none; width:40px; height:40px; padding:0; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  #sendForm > button:not(#attach) svg { display:block; margin-left:1px; }
+  .msg img { display:block; max-width:100%; max-height:260px; border-radius:12px; margin-top:4px; cursor:zoom-in; }
+  #viewer { position:fixed; inset:0; background:rgba(0,0,0,.92); display:flex; align-items:center; justify-content:center; z-index:10; cursor:zoom-out; }
+  #viewer img { max-width:100%; max-height:100%; }
+  .check { display:flex; gap:8px; align-items:center; }
+  .check input { width:auto; }
+  .link { align-self:flex-start; background:transparent; color:var(--muted); border:1px solid var(--line); padding:8px 14px; font-size:.82rem; font-weight:600; }
+  .link:hover { background:var(--hover); }
+  #tools { display:flex; flex-wrap:wrap; gap:8px; padding:8px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+  #tools button { padding:6px 12px; font-size:.78rem; font-weight:600; background:var(--hover); color:var(--ink); border:0; }
+  #online { padding:8px 14px; border-bottom:1px solid var(--line); font:.8rem system-ui,sans-serif; color:var(--muted); background:var(--panel); }
+  #online::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:6px; }
+  #online.on { color:var(--ink); }
+  #online.on::before { background:#31a24c; }
+  .rcpt { display:block; text-align:right; font:600 .68rem system-ui,sans-serif; opacity:.7; margin-top:2px; }
+  .rcpt.seen { opacity:1; color:var(--seen); }
+  .mopt { background:transparent; color:inherit; border:0; padding:0 6px; margin:-4px -6px -4px 0; font-size:1.15rem; line-height:1.5; font-weight:700; }
+  #msgMenu { position:fixed; top:0; left:0; z-index:20; min-width:190px; padding:6px; display:flex; flex-direction:column; gap:4px; background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:0 8px 28px rgba(0,0,0,.28); }
+  #msgMenu button { text-align:left; background:transparent; color:var(--ink); font-weight:500; border-radius:8px; padding:10px 12px; }
+  #msgMenu button:hover { background:var(--hover); }
+  #msgMenu button.danger { color:#e41e3f; }
+  #typing { min-height:24px; padding:3px 18px 0; font:italic .8rem system-ui,sans-serif; color:var(--muted); }
+  .dots i { font-style:normal; animation:blink 1.2s infinite; }
+  .dots i:nth-child(2) { animation-delay:.2s; } .dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes blink { 0%,60%,100% { opacity:.2; } 30% { opacity:1; } }
+  @media (prefers-reduced-motion: reduce) { .dots i { animation:none; } }
+  #backBtn { width:34px; height:34px; padding:0; font-size:1.3rem; line-height:1; background:transparent; color:var(--ink); border:0; border-radius:50%; flex:none; }
+  #backBtn:hover { background:var(--hover); }
+  #addBtn { width:38px; height:38px; padding:0; font-size:1.3rem; line-height:1; background:var(--acc); color:#fff; border:0; border-radius:50%; display:grid; place-items:center; }
+  h1 { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #listScreen { padding:0; gap:0; }
+  .row { display:flex; align-items:center; gap:12px; padding:10px 14px; margin:1px 8px; border-radius:12px; cursor:pointer; }
+  .row:hover { background:var(--hover); }
+  .av { flex:none; width:52px; height:52px; border-radius:50%; display:grid; place-items:center; font:600 1.1rem system-ui,sans-serif; color:#fff; box-shadow:inset 0 0 0 2px rgba(255,255,255,.15); }
+  .rb { flex:1; min-width:0; }
+  .rt { display:flex; justify-content:space-between; gap:8px; font:1rem system-ui,sans-serif; color:var(--ink); }
+  .rt small, .rp { font:.85rem system-ui,sans-serif; color:var(--muted); }
+  .rp { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row.un .rt b, .row.un .rp { color:var(--ink); font-weight:700; }
+  .badge { background:var(--acc); color:#fff; border-radius:10px; min-width:20px; padding:0 6px; text-align:center; font:700 .72rem/20px system-ui,sans-serif; }
+  .roomDel { flex:none; background:transparent; color:var(--muted); border:0; padding:6px 10px; border-radius:50%; font-size:.85rem; }
+  .roomDel:hover { background:var(--line); }
+  #empty { padding:30px 20px; text-align:center; }
+  #httpsBar { padding:10px 14px; background:#fff3cd; color:#5c4400; font:.82rem/1.4 system-ui,sans-serif; border-bottom:1px solid #e6d28a; }
+  .hidden { display:none !important; }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header><button type="button" id="backBtn" class="hidden" aria-label="Back">&#8592;</button><h1 id="title">Chats</h1><div class="hdrR"><button type="button" id="addBtn" aria-label="New chat">&#65291;</button><button type="button" id="callBtn" class="hidden" aria-label="Start video call" title="Video call"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11z"/></svg></button><button type="button" id="menuBtn" class="hidden" aria-label="Menu" aria-haspopup="true">&#8942;</button></div>
+    <div id="menu" class="hidden" role="menu"><div id="status" role="status">Not connected</div><button type="button" id="newChat" role="menuitem">Remove this chat</button></div></header>
+  <div id="httpsBar" class="hidden" role="alert"><b>Camera and microphone are blocked on this page.</b> It was opened from a file on the phone, and browsers never allow the camera there, whatever you set in permissions. Open it from its https web address instead (upload the folder to your host). Chat still works.</div>
+
+  <div class="screen hidden" id="listScreen"><div id="chatList"></div><div id="empty" class="hidden"><p>No chats yet. Tap &#65291; to start one.</p></div></div>
+  <form class="screen hidden" id="joinForm">
+    <p>Start a chat with one person or a group: everyone who enters the same chat name and password lands in the same chat. Pick a name and password only you and they know, and give them to that person. Every chat stays separate in your list.</p>
+    <div><label for="name">Your name</label><input id="name" maxlength="24" autocomplete="off" required></div>
+    <div><label for="room">Chat name</label><input id="room" maxlength="40" autocomplete="off" autocapitalize="off" required><p id="lastWith"></p></div>
+    <div><label for="pass">Chat password (encrypts your messages)</label><input id="pass" type="password" autocomplete="off" required></div>
+    <label class="check"><input type="checkbox" id="remember" checked> Remember my password and open this room automatically</label>
+    <details>
+      <summary>Your own servers (optional backup)</summary>
+      <label for="own">Address(es) of your Render server(s), separated by spaces or commas</label>
+      <input id="own" placeholder="https://my-chat.onrender.com https://second.onrender.com" autocomplete="off" autocapitalize="off" inputmode="url">
+      <p>Used alongside the public relays. If the public relays are blocked, this keeps the chat working.</p>
+    </details>
+    <button>Open chat</button>
+    <button type="button" class="link" id="cancelNew">Cancel</button>
+    <p id="err" role="alert"></p>
+    <button type="button" class="link" id="forget">Forget saved details</button>
+  </form>
+
+  <div id="chat" class="hidden">
+    <div id="tools"><button type="button" id="saveChat">Save to phone</button><button type="button" id="clearChat">Clear history</button><button type="button" id="notifBtn">🔔 Turn on notifications</button></div>
+    <div id="online" aria-live="polite">Checking who is online…</div>
+    <div id="messages" aria-live="polite"></div>
+    <div id="typing" aria-live="polite"></div>
+    <form id="sendForm">
+      <button type="button" id="attach" aria-label="Send a photo">📷</button>
+      <input id="file" type="file" accept="image/*" class="hidden">
+      <input id="msg" autocomplete="off" maxlength="1000" placeholder="Type a message" aria-label="Message">
+      <button aria-label="Send"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 22 12 3.4 3.6 3 10l13 2-13 2z"/></svg></button>
+    </form>
+  </div>
+</div>
+
+<div id="call" class="hidden" role="dialog" aria-label="Video call">
+  <video id="rv" autoplay playsinline></video>
+  <div id="rOff" class="hidden"><div class="avc" id="avc"></div><span id="rOffTxt"></span></div>
+  <video id="lv" class="hidden" autoplay playsinline muted></video>
+  <div id="callTop">
+    <b id="callWho"></b><span id="callState"></span>
+    <div id="modeSw" role="group" aria-label="Call type"><button type="button" id="mV">&#128249; Video</button><button type="button" id="mA">&#127908; Audio only</button></div>
+    <div id="callErr" class="hidden" role="alert"><span id="callErrTxt"></span><button type="button" id="callRetry">Try again</button></div>
+  </div>
+  <div id="callIn" class="hidden">
+    <div class="cw"><button type="button" class="cbtn red" id="cDecline" aria-label="Decline">&#10005;</button>Decline</div>
+    <div class="cw"><button type="button" class="cbtn green" id="cAcceptA" aria-label="Answer with audio only">&#127908;</button>Audio only</div>
+    <div class="cw"><button type="button" class="cbtn green" id="cAcceptV" aria-label="Answer with video">&#128249;</button>Video</div>
+  </div>
+  <div id="callCtl" class="hidden">
+    <div class="cw"><button type="button" class="cbtn" id="cMic" aria-label="Mute microphone">&#127908;</button>Mic</div>
+    <div class="cw"><button type="button" class="cbtn" id="cFlip" aria-label="Switch camera">&#128260;</button>Flip</div>
+    <div class="cw"><button type="button" class="cbtn red" id="cEnd" aria-label="End call">&#10005;</button>End</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js" onerror="window.mqttFailed=true"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js" onerror="window.mqttFailed=true"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const myId = Math.random().toString(36).slice(2, 10);
+  // Fixed id for this device: lets the relays recognise it and hold messages while the page is closed.
+  let devId = '';
+  try { devId = localStorage.getItem('roomchatDevice') || ''; if (!devId) { devId = Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 6); localStorage.setItem('roomchatDevice', devId); } } catch (_) {}
+  let loadedAt = 0, missedShown = false, lockKey = '', beatTimer = null;
+  const online = new Map(); let hbTimer = null, joinTimer = null;   // who is active: sender id -> { n, ts }
+  const mine = new Map();          // my sent message id -> { r: receipt label, by: Set of names who have seen it }
+  const typers = new Map();        // sender id -> { n, ts } for people typing right now
+  const pendingSeen = new Set();   // received messages I have not yet reported as seen
+  let unread = 0, lastTypingSent = 0, typingTxt = '';
+  const bubbles = new Map();       // message id -> { el, mid, dev, me, who, time, key, gone } for every bubble on screen
+  const gone = new Map();          // ids someone deleted before the message reached me -> sender device
+  let xn = 0;
+  // Only one tab per room keeps the "held messages" session, otherwise two tabs would kick each other off.
+  function ownsSession() {
+    try {
+      lockKey = 'roomchatLock:' + topic;
+      const v = JSON.parse(localStorage.getItem(lockKey) || 'null');
+      if (v && v.t !== myId && Date.now() - v.ts < 9000) return false;
+      const beat = () => localStorage.setItem(lockKey, JSON.stringify({ t: myId, ts: Date.now() }));
+      beat(); clearInterval(beatTimer); beatTimer = setInterval(beat, 3000);
+      return !!devId;
+    } catch (_) { return false; }
+  }
+  const BROKERS = [
+    ['EMQX', 'wss://broker.emqx.io:8084/mqtt'],
+    ['HiveMQ', 'wss://broker.hivemq.com:8884/mqtt'],
+    ['Mosquitto', 'wss://test.mosquitto.org:8081'],
+    ['Eclipse', 'wss://mqtt.eclipseprojects.io/mqtt'],
+    ['MQTTHQ', 'wss://public.mqtthq.com:8084/mqtt']
+  ];
+  let clients = [], key, topic, name, room, shown = false;
+  const seen = new Set();
+  try { $('own').value = localStorage.getItem('ownServer') || ''; } catch (_) {}
+  if (!$('own').value && /^https?:$/.test(location.protocol) && !/^(localhost|127\.|192\.168\.)/.test(location.hostname)) $('own').value = location.origin;
+  function ownUrl() {
+    const us = $('own').value.split(/[\s,;]+/).map(u => u.trim().replace(/\/+$/, '')).filter(Boolean)
+      .map(u => /^https?:\/\//i.test(u) ? u : 'https://' + u);
+    try { localStorage.setItem('ownServer', us.join(' ')); } catch (_) {}
+    return us;
+  }
+  // ---- Remember your name, the list of rooms, optional passwords, and who you chatted with ----
+  const SKEY = 'roomchatSettings';
+  const loadSettings = () => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch (_) { return {}; } };
+  const saveSettings = (o) => { try { localStorage.setItem(SKEY, JSON.stringify(o)); } catch (_) {} };
+  let st = loadSettings();
+  if (!Array.isArray(st.rooms)) {            // upgrade data saved by the older single-room version
+    st.rooms = [];
+    if (st.room) st.rooms.push({ room: st.room, pass: st.remember ? st.pass : undefined, ts: Date.now() });
+    delete st.room; delete st.pass; delete st.remember; saveSettings(st);
+  }
+  function showPeers() {
+    const l = (st.peers && st.peers[$('room').value.trim().toLowerCase()]) || [];
+    $('lastWith').textContent = l.length ? 'Last chat with: ' + l.join(', ') : '';
+  }
+  function notePeer(n) {
+    if (!room || !n) return;
+    st.peers = st.peers || {};
+    const l = st.peers[room] || (st.peers[room] = []);
+    if (l.includes(n)) return;
+    l.unshift(n); if (l.length > 5) l.pop();
+    saveSettings(st); renderRooms();
+  }
+  function rememberJoin(pass) {
+    st.name = name;
+    const e = st.rooms.find(x => x.room === room) || { room };
+    st.rooms = st.rooms.filter(x => x.room !== room);
+    e.ts = Date.now();
+    if ($('remember').checked) e.pass = pass; else delete e.pass;
+    st.rooms.unshift(e);
+    if (st.rooms.length > 20) st.rooms.length = 20;
+    saveSettings(st); renderRooms();
+  }
+  function joinSaved(e) {
+    if (st.name) $('name').value = st.name;
+    $('room').value = e.room; showPeers();
+    $('remember').checked = !!e.pass;
+    if (e.pass) {
+      $('pass').value = e.pass;
+      const f = $('joinForm');
+      if (f.requestSubmit) f.requestSubmit(); else f.dispatchEvent(new Event('submit', { cancelable: true }));
+    } else {
+      show('form'); $('pass').value = ''; $('pass').focus();
+      $('err').textContent = 'Enter the password for "' + e.room + '", then tap Join room.';
+    }
+  }
+  function fmt(ts) { const d = new Date(ts); return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : Date.now() - ts < 6048e5 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' }); }
+  function tu() { return unread + Object.values(st.unread || {}).reduce((a, b) => a + b, 0); }
+  function setLast(t, who) { st.last = st.last || {}; st.last[room] = { t: String(t).slice(0, 80), who, ts: Date.now() }; saveSettings(st); }
+  function show(v) {
+    const id = { form: 'joinForm', list: 'listScreen', chat: 'chat' }[v];
+    ['joinForm', 'listScreen', 'chat'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+    $('backBtn').classList.toggle('hidden', v === 'list'); $('addBtn').classList.toggle('hidden', v !== 'list');
+    $('menuBtn').classList.toggle('hidden', v !== 'chat'); $('callBtn').classList.toggle('hidden', v !== 'chat');
+    $('title').textContent = v === 'chat' ? room : v === 'form' ? 'New chat' : 'Chats';
+    if (v === 'list') renderRooms();
+    updateTitle();
+  }
+  function renderRooms() {
+    const box = $('chatList'); box.textContent = '';
+    $('empty').classList.toggle('hidden', !!st.rooms.length);
+    const L = st.last || {}, U = st.unread || {}, act = (e) => (L[e.room] || {}).ts || e.ts || 0;
+    st.rooms.slice().sort((a, b) => act(b) - act(a)).forEach(e => {
+      const l = L[e.room], u = U[e.room] || 0, row = document.createElement('div');
+      row.className = 'row' + (u ? ' un' : ''); row.tabIndex = 0;
+      let h = 0; for (const c of e.room) h = (h * 31 + c.charCodeAt(0)) % 360;
+      const av = document.createElement('div'); av.className = 'av'; av.style.background = 'hsl(' + h + ',45%,42%)'; av.textContent = (e.room[0] || '?').toUpperCase();
+      const b = document.createElement('div'); b.className = 'rb';
+      const t = document.createElement('div'); t.className = 'rt';
+      const nm = document.createElement('b'); nm.textContent = e.room;
+      const tm = document.createElement('small'); tm.textContent = fmt(act(e)); t.append(nm, tm);
+      const p = document.createElement('div'); p.className = 'rp'; p.textContent = l ? l.who + ': ' + l.t : (e.pass ? 'Tap to open' : 'Password needed');
+      b.append(t, p); row.append(av, b);
+      if (u) { const g = document.createElement('span'); g.className = 'badge'; g.textContent = u > 99 ? '99+' : u; row.appendChild(g); }
+      const del = document.createElement('button'); del.type = 'button'; del.className = 'roomDel'; del.textContent = '✕';
+      del.setAttribute('aria-label', 'Remove ' + e.room);
+      del.onclick = (ev) => { ev.stopPropagation(); if (!confirm('Remove "' + e.room + '" from your list?')) return; st.rooms = st.rooms.filter(x => x !== e); keys.delete(e.room); saveSettings(st); renderRooms(); };
+      row.append(del);
+      row.onclick = () => joinSaved(e); row.onkeydown = (ev) => { if (ev.key === 'Enter') joinSaved(e); };
+      box.appendChild(row);
+    });
+  }
+  if (st.name) $('name').value = st.name;
+  $('room').addEventListener('input', showPeers);
+  $('forget').addEventListener('click', () => {
+    st = { rooms: [] }; saveSettings(st);
+    $('name').value = ''; $('room').value = ''; $('pass').value = ''; $('remember').checked = false;
+    showPeers(); renderRooms();
+  });
+  showPeers(); renderRooms();
+  const loadScript = (src) => new Promise((ok, no) => { const t = document.createElement('script'); t.src = src; t.onload = ok; t.onerror = no; document.head.appendChild(t); });
+
+  const status = (t, on) => { $('status').textContent = t; $('status').className = on ? 'on' : ''; };
+  const b64 = (u8) => { let s = ''; u8.forEach(x => s += String.fromCharCode(x)); return btoa(s); };
+  const unb64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const hex = (buf) => [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, '0')).join('');
+
+  function addSys(t) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = t; $('messages').appendChild(d); $('messages').scrollTop = 1e9; }
+  function addMsg(who, text, time, me) {
+    const d = document.createElement('div'); d.className = 'msg' + (me ? ' me' : '');
+    const s = document.createElement('small'); s.textContent = who + ' · ' + time;
+    const b = document.createElement('span'); b.textContent = text;
+    d.append(s, b); $('messages').appendChild(d); $('messages').scrollTop = 1e9;
+    return d;
+  }
+
+  // Works on every browser (no secure-context requirement), so phone and computer always agree.
+  function makeKey(pass, room) {
+    let h = nacl.hash(enc.encode('roomchat-v2:' + room + ':' + pass));
+    for (let i = 0; i < 4000; i++) h = nacl.hash(h);
+    return h.slice(0, 32);
+  }
+  function seal(obj) {
+    const nonce = nacl.randomBytes(24);
+    const box = nacl.secretbox(enc.encode(JSON.stringify(obj)), nonce, key);
+    return JSON.stringify({ i: b64(nonce), c: b64(box) });
+  }
+  function open(payload) {
+    const o = JSON.parse(payload);
+    const pt = nacl.secretbox.open(unb64(o.c), unb64(o.i), key);
+    if (!pt) throw new Error('wrong key');
+    return JSON.parse(dec.decode(pt));
+  }
+  const build = (obj) => seal({ ...obj, id: myId, dev: devId, ts: Date.now(), mid: obj.mid || Math.random().toString(36).slice(2), n: name });
+  // Messages and photos use QoS 1 so a relay holds them for members who are offline; presence notices use QoS 0 and are never held.
+  const send = (obj, qos = 1) => { const p = build(obj); clients.forEach(c => c.connected && c.publish(topic, p, { qos })); };
+  // Online list: anyone who sent something in the last 50 seconds (a heartbeat goes out every 20).
+  function renderOnline() {
+    const cut = Date.now() - 50000;
+    online.forEach((v, k) => { if (v.ts < cut) online.delete(k); });
+    const names = [...new Set([...online.values()].map(v => v.n))].sort();
+    const el = $('online');
+    el.textContent = names.length ? 'Online now: ' + names.join(', ') : 'No one else is online right now';
+    el.className = names.length ? 'on' : '';
+  }
+  // ---- Notifications, typing and seen receipts ----
+  const isActive = () => document.visibilityState === 'visible' && document.hasFocus();
+  function updateTitle() {
+    document.title = (tu() ? '(' + tu() + ') ' : '') + (shown && room ? room + ' · ' : '') + 'Room Chat';
+    try { if (navigator.setAppBadge) { if (tu()) navigator.setAppBadge(tu()); else navigator.clearAppBadge(); } } catch (_) {}
+  }
+  function paintNotif() {
+    const b = $('notifBtn');
+    if (!('Notification' in window)) { b.classList.add('hidden'); return; }
+    const p = Notification.permission;
+    b.textContent = p === 'granted' ? '🔔 Notifications on' : p === 'denied' ? '🔕 Notifications blocked' : '🔔 Turn on notifications';
+  }
+  async function notify(title, body, tg) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const opts = { body: String(body).slice(0, 120), tag: 'roomchat:' + (tg || room), renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', vibrate: [120, 60, 120] };
+    try {
+      const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+      if (reg && reg.active) { await reg.showNotification(title, opts); return; }   // works on phones
+    } catch (_) {}
+    try { const n = new Notification(title, opts); n.onclick = () => { window.focus(); n.close(); }; } catch (_) {}
+  }
+  // Called for every message from someone else: if I am not looking at the app, alert me.
+  function alertIncoming(who, text) {
+    if (isActive()) return;
+    unread++; updateTitle();
+    if (unread > 1) notify(room + ' · ' + unread + ' new messages', who + ': ' + text); else notify(who, text);
+  }
+  function renderTyping() {
+    const cut = Date.now() - 5000;
+    typers.forEach((v, k) => { if (v.ts < cut) typers.delete(k); });
+    const names = [...new Set([...typers.values()].map(v => v.n))].sort();
+    const txt = !names.length ? '' : names.length === 1 ? names[0] + ' is typing' : names.length === 2 ? names[0] + ' and ' + names[1] + ' are typing' : 'Several people are typing';
+    if (txt === typingTxt) return;
+    typingTxt = txt;
+    const el = $('typing'); el.textContent = txt;
+    if (txt) { const d = document.createElement('span'); d.className = 'dots'; d.innerHTML = '<i>.</i><i>.</i><i>.</i>'; el.appendChild(d); }
+  }
+  function onTyping(m) {
+    if (m.s) typers.delete(m.id); else typers.set(m.id, { n: String(m.n).slice(0, 24), ts: Date.now() });
+    renderTyping();
+  }
+  // Seen receipts: shown under my own messages.
+  function paintRcpt(e) {
+    if (e.by.size) {
+      const peers = (st.peers && st.peers[room]) || [];
+      e.r.textContent = '✓✓ Seen' + (e.by.size > 1 || peers.length > 1 ? ' by ' + [...e.by].join(', ') : '');
+      e.r.classList.add('seen');
+    } else { e.r.textContent = '✓ Sent'; e.r.classList.remove('seen'); }
+  }
+  function trackMine(mid, el, by) {
+    const r = document.createElement('span'); r.className = 'rcpt'; el.appendChild(r);
+    const e = { r, by: new Set(by || []) }; mine.set(mid, e); paintRcpt(e);
+  }
+  function onSeen(m) {
+    const who = String(m.n).slice(0, 24);
+    (Array.isArray(m.of) ? m.of : [m.of]).slice(0, 60).forEach(id => {
+      const e = mine.get(String(id));
+      if (!e || e.by.has(who)) return;
+      e.by.add(who); paintRcpt(e);
+      keep({ k: 'seen', of: String(id), by: who });
+    });
+  }
+  // I report a message as seen only once the app is actually on screen.
+  function queueSeen(mid) { pendingSeen.add(mid); flushSeen(); }
+  function flushSeen() {
+    if (!shown || !isActive() || !pendingSeen.size) return;
+    const ids = [...pendingSeen].slice(0, 50); ids.forEach(i => pendingSeen.delete(i));
+    send({ k: 'seen', of: ids }, 1);
+    if (pendingSeen.size) flushSeen();
+  }
+  function onActive() { if (!isActive()) return; unread = 0; updateTitle(); flushSeen(); }
+
+  // ---- Deleting a message: for me only, or for everyone (own messages) ----
+  function addOpt(el) {
+    const sm = el.querySelector('small'); if (!sm) return;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'mopt'; b.textContent = '⋯';
+    b.setAttribute('aria-label', 'Message options');
+    b.onclick = (ev) => { ev.stopPropagation(); openMsgMenu(b, el._id); };
+    sm.appendChild(b);
+  }
+  // Every bubble is registered here so it can be found again when it is deleted.
+  function reg(el, o) {
+    const id = o.mid || 'x' + (++xn);
+    el._id = id; bubbles.set(id, { ...o, id, el }); addOpt(el);
+  }
+  function closeMsgMenu() { const m = $('msgMenu'); if (m) m.remove(); }
+  function openMsgMenu(btn, id) {
+    closeMsgMenu();
+    const e = bubbles.get(id); if (!e) return;
+    const m = document.createElement('div'); m.id = 'msgMenu'; m.setAttribute('role', 'menu');
+    const add = (label, cls, fn) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.className = cls; b.setAttribute('role', 'menuitem');
+      b.onclick = (ev) => { ev.stopPropagation(); closeMsgMenu(); fn(); }; m.appendChild(b);
+    };
+    add('Delete for me', '', () => { if (confirm('Delete this message from this device? Other people will still see it.')) deleteMsg(id, 'me'); });
+    if (e.me && e.mid) add('Delete for everyone', 'danger', () => { if (confirm('Delete this message for everyone in the room? It will disappear without a trace.')) deleteMsg(id, 'everyone'); });
+    document.body.appendChild(m);
+    const r = btn.getBoundingClientRect();
+    m.style.top = Math.max(8, Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8)) + 'px';
+    m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + 'px';
+  }
+  // Keep the saved history in step: the message row (and any seen receipts for it) is removed completely.
+  function dbEdit(e) {
+    if (!db) return;
+    try {
+      const store = db.transaction('log', 'readwrite').objectStore('log');
+      const rq = store.index('topic').openCursor(topic);
+      rq.onsuccess = () => {
+        const c = rq.result; if (!c) return;
+        let r = null;
+        try { r = open(c.value.blob); } catch (_) {}
+        const hit = (e.key !== undefined && c.primaryKey === e.key) || (r && e.mid && (r.mid === e.mid || (r.k === 'seen' && r.of === e.mid)));
+        if (hit) c.delete();
+        c.continue();
+      };
+    } catch (_) {}
+  }
+  function wipe(id) {
+    const e = bubbles.get(id); if (!e) return;
+    if (e.mid) { mine.delete(e.mid); seen.add(e.mid); pendingSeen.delete(e.mid); }
+    dbEdit(e);
+    e.el.remove(); bubbles.delete(id);
+  }
+  function deleteMsg(id, mode) {
+    const e = bubbles.get(id); if (!e) return;
+    if (mode === 'everyone' && e.mid && e.me) send({ k: 'del', of: e.mid }, 1);
+    wipe(id);
+  }
+  // Someone deleted one of their messages for everyone.
+  function onDel(m) {
+    const id = String(m.of).slice(0, 40), who = String(m.n).slice(0, 24), e = bubbles.get(id);
+    if (!e) { gone.set(id, m.dev); if (gone.size > 500) gone.delete(gone.keys().next().value); return; }   // message has not arrived yet
+    if (e.me) return;
+    if (!(e.dev ? e.dev === m.dev : e.who === who)) return;   // only the sender may delete it for everyone
+    wipe(id);
+  }
+
+  // Label for a message; messages that were waiting for you get a date and a one-time divider.
+  function stamp(m) {
+    const t = String(m.time || '').slice(0, 12);
+    if (!(m.ts && Date.now() - m.ts > 45000)) return t;
+    if (!missedShown) { missedShown = true; addSys('Messages received while you were away:'); }
+    return new Date(m.ts).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + t;
+  }
+
+  async function onMessage(_t, buf) {
+    try {
+      const m = open(buf.toString());
+      if (m.id === myId || seen.has(m.mid)) return;
+      if (m.dev === devId && m.ts < loadedAt) return;   // my own older message, already in my saved history
+      seen.add(m.mid); if (seen.size > 1500) seen.delete(seen.values().next().value);
+      notePeer(String(m.n).slice(0, 24));
+      if (m.k === 'leave') { online.delete(m.id); typers.delete(m.id); renderTyping(); }
+      else if (!m.ts || Date.now() - m.ts < 45000) online.set(m.id, { n: String(m.n).slice(0, 24), ts: Date.now() });
+      renderOnline();
+      if (m.k === 'join') { addSys(String(m.n).slice(0, 24) + ' joined'); send({ k: 'here' }, 0); }
+      else if (m.k === 'here') addSys(String(m.n).slice(0, 24) + ' is here');
+      else if (m.k === 'leave') addSys(String(m.n).slice(0, 24) + ' left');
+      else if (m.k === 'img') onChunk(m);
+      else if (m.k === 'typing') onTyping(m);
+      else if (m.k === 'seen') onSeen(m);
+      else if (m.k === 'del') onDel(m);
+      else if (m.k === 'call') onCall(m);
+      else if (m.k === 'msg') {
+        if (gone.get(m.mid) === m.dev) { seen.add(m.mid); return; }   // deleted before it reached me
+        const who = String(m.n).slice(0, 24), text = String(m.t).slice(0, 1000), time = stamp(m);
+        const el = addMsg(who, text, time, false);
+        reg(el, { mid: m.mid, dev: m.dev, me: false, who, time });
+        keep({ k: 'msg', who, text, time, me: false, mid: m.mid, dev: m.dev }, el);
+        typers.delete(m.id); renderTyping(); queueSeen(m.mid); setLast(text, who); alertIncoming(who, text);
+      }
+    } catch (_) { /* wrong password or foreign message: ignore */ }
+  }
+  const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  $('joinForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('err').textContent = '';
+    if ('Notification' in window && Notification.permission === 'default' && (!navigator.userActivation || navigator.userActivation.isActive)) Notification.requestPermission().then(paintNotif).catch(() => {});
+    if (window.mqttFailed || typeof mqtt === 'undefined' || typeof nacl === 'undefined') { show('form'); $('err').textContent = 'Could not load the connection library. Check your internet and reload.'; return; }
+    name = $('name').value.trim(); room = $('room').value.trim().toLowerCase();
+    const pass = $('pass').value;
+    rememberJoin(pass);
+    if (st.unread && st.unread[room]) { st.unread[room] = 0; saveSettings(st); }
+    if (pass && !(keys.get(room) && keys.get(room).k === room + '|' + pass)) startBg();
+    status('Connecting…', false);
+    await new Promise(r => setTimeout(r, 30));
+    key = makeKey(pass, room);
+    topic = 'roomchat-v2/' + hex(nacl.hash(enc.encode('topic:' + room))).slice(0, 32);
+    const match = hex(nacl.hash(key)).slice(0, 6);
+    await loadHistory(); show('chat');
+
+    clients.forEach(c => c.end(true)); clients = []; shown = false; missedShown = false; loadedAt = Date.now(); online.clear();
+    const own = ownUrl();
+    const persist = ownsSession();
+    const refresh = () => {
+      const up = clients.filter(c => c.connected).length;
+      status(up ? 'Connected (' + up + '/' + clients.length + ' relays)' : (shown ? 'Reconnecting…' : 'Connecting…'), up > 0);
+    };
+    const ready = (c) => {
+      if (!shown) {
+        shown = true;
+        show('chat'); paintNotif();
+        addSys('You joined "' + room + '". Match code: ' + match + ' (everyone in the chat must see the same code).');
+        send({ k: 'join' }, 0);
+        renderOnline(); clearInterval(hbTimer); hbTimer = setInterval(() => { send({ k: 'hb' }, 0); renderOnline(); }, 20000);
+        if (!persist) addSys('This room is also open in another tab, which collects messages held while you are away.');
+      } else c.publish(topic, build({ k: 'here' }), { qos: 0 });
+      refresh();
+    };
+
+    // Public relays (MQTT)
+    BROKERS.forEach(([label, url]) => {
+      // Fixed client id + persistent MQTT 5 session: the relay keeps this device's subscription and queues messages while it is closed.
+      const c = mqtt.connect(url, persist
+        ? { clientId: 'rc_' + devId + '_' + topic.slice(-8) + '_' + label, clean: false, protocolVersion: 5, properties: { sessionExpiryInterval: 604800 }, reconnectPeriod: 3000, connectTimeout: 8000 }
+        : { clientId: 'rc_' + myId + '_' + label, clean: true, reconnectPeriod: 3000, connectTimeout: 8000 });
+      c.on('connect', () => c.subscribe(topic, { qos: 1 }, (err) => { if (!err) ready(c); }));
+      c.on('close', refresh);
+      c.on('message', onMessage);
+      c.on('error', () => {});
+      clients.push(c);
+    });
+
+    // Your own server(s) (Socket.IO), if any addresses were given
+    own.forEach((u) => {
+      const a = { connected: false, sock: null,
+        publish(t, p) { if (this.sock && this.connected) this.sock.emit('relay', { topic: t, payload: p }); },
+        end() { if (this.sock) this.sock.disconnect(); } };
+      clients.push(a);
+      loadScript(u + '/socket.io/socket.io.js').then(() => {
+        const sock = io(u, { transports: ['websocket', 'polling'] });
+        a.sock = sock;
+        sock.on('connect', () => sock.emit('join-room', topic, () => { a.connected = true; ready(a); }));
+        sock.on('disconnect', () => { a.connected = false; refresh(); });
+        sock.on('relay', (payload) => onMessage(null, { toString: () => payload }));
+      }).catch(() => {});
+    });
+
+    clearTimeout(joinTimer);
+    joinTimer = setTimeout(() => {
+      if (!shown) {
+        $('err').textContent = own.length
+          ? 'Could not connect yet. Your server(s) may still be waking up (up to a minute); keep this page open. Otherwise check the server address.'
+          : 'Could not reach any relay server. Try another network, turn off any VPN or ad-blocker, or add your own server(s) under "Your own servers".'; show('form');
+        status('Not connected', false);
+      }
+    }, own.length ? 30000 : 15000);
+  });
+
+  // ---- History: saved on this device, encrypted with the room password ----
+  let db = null;
+  const MAX_KEPT = 500;
+  function openDb() {
+    return new Promise(res => {
+      try {
+        const r = indexedDB.open('roomchat', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('log', { autoIncrement: true }).createIndex('topic', 'topic');
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => res(null);
+      } catch (_) { res(null); }
+    });
+  }
+  function keep(rec, el) {
+    if (!db) return;
+    try {
+      const ts = Date.now();
+      const rq = db.transaction('log', 'readwrite').objectStore('log').add({ topic, ts, blob: seal({ ...rec, ts }) });
+      if (el) rq.onsuccess = () => { const e = bubbles.get(el._id); if (e) e.key = rq.result; };
+    } catch (_) {}
+  }
+  function readAll() {
+    return new Promise(res => {
+      try {
+        const tx = db.transaction('log'), ix = tx.objectStore('log').index('topic');
+        const rq = ix.getAll(topic), kq = ix.getAllKeys(topic);
+        tx.oncomplete = () => {
+          const out = [];
+          rq.result.map((row, n) => ({ row, k: kq.result[n] })).sort((a, b) => a.row.ts - b.row.ts).forEach(x => { try { const r = open(x.row.blob); r._k = x.k; out.push(r); } catch (_) {} });
+          res(out);
+        };
+        tx.onerror = tx.onabort = () => res([]);
+      } catch (_) { res([]); }
+    });
+  }
+  function prune() {
+    try {
+      const store = db.transaction('log', 'readwrite').objectStore('log');
+      const r = store.index('topic').getAllKeys(topic);
+      r.onsuccess = () => r.result.slice(0, Math.max(0, r.result.length - MAX_KEPT)).forEach(k => store.delete(k));
+    } catch (_) {}
+  }
+  async function loadHistory() {
+    $('messages').textContent = '';
+    mine.clear(); typers.clear(); pendingSeen.clear(); bubbles.clear(); renderTyping();
+    db = await openDb();
+    if (!db) { addSys('This browser cannot save history, so messages will not be kept.'); return; }
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    prune();
+    const recs = await readAll();
+    recs.forEach(r => { if (r.mid) seen.add(r.mid); });
+    let day = '';
+    const seenBy = {};
+    recs.forEach(r => { if (r.k === 'seen') (seenBy[r.of] = seenBy[r.of] || []).push(r.by); });
+    recs.filter(r => r.k === 'tomb').forEach(r => dbEdit({ key: r._k, mid: r.mid }));
+    const msgs = recs.filter(r => r.k !== 'seen' && r.k !== 'tomb');
+    msgs.forEach(r => {
+      const d = new Date(r.ts).toLocaleDateString();
+      if (d !== day) { day = d; addSys(d); }
+      const el = r.k === 'photo' ? addPhotoMsg(r.who, r.src, r.time, r.me) : addMsg(r.who, r.text, r.time, r.me);
+      reg(el, { mid: r.mid, dev: r.dev || (r.me ? devId : ''), me: !!r.me, who: r.who, time: r.time, key: r._k });
+      if (r.me && r.mid) trackMine(r.mid, el, seenBy[r.mid]);
+    });
+    if (msgs.length) addSys('Earlier messages above were loaded from this device.');
+  }
+  async function saveChat() {
+    if (!db) { addSys('History is not available in this browser.'); return; }
+    const recs = (await readAll()).filter(r => r.k !== 'seen' && r.k !== 'tomb');
+    if (!recs.length) { addSys('No saved messages yet.'); return; }
+    const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const rows = recs.map(r => '<p><b>' + esc(r.who) + '</b> <small>' + esc(new Date(r.ts).toLocaleString()) + '</small><br>' +
+      (r.k === 'photo' ? '<img style="max-width:100%;max-height:300px" src="' + esc(r.src) + '">' : esc(r.text)) + '</p>').join('');
+    const html = '<!DOCTYPE html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat ' + esc(room) +
+      '</title><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:12px"><h2>' + esc(room) + '</h2>' + rows;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    a.download = 'chat-' + room.replace(/[^a-z0-9_-]/gi, '_') + '-' + new Date().toISOString().slice(0, 10) + '.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    addSys('Saved to your Downloads folder.');
+  }
+  function clearHistory() {
+    if (!db || !confirm('Delete the saved history for this room on this device?')) return;
+    const store = db.transaction('log', 'readwrite').objectStore('log');
+    const r = store.index('topic').getAllKeys(topic);
+    r.onsuccess = () => { r.result.forEach(k => store.delete(k)); $('messages').textContent = ''; bubbles.clear(); mine.clear(); addSys('History cleared on this device.'); };
+  }
+  $('saveChat').addEventListener('click', saveChat);
+  $('clearChat').addEventListener('click', clearHistory);
+
+  // ---- Photos: shrunk, split into small encrypted pieces, sent through every relay ----
+  const CHUNK = 8000, MAX_CHARS = 200000, incoming = {};
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  function viewer(src) {
+    const v = document.createElement('div'); v.id = 'viewer';
+    const i = document.createElement('img'); i.src = src; i.alt = 'Photo';
+    v.appendChild(i); v.onclick = () => v.remove(); document.body.appendChild(v);
+  }
+  function attachImage(wrap, src) {
+    const img = document.createElement('img'); img.alt = 'Photo';
+    img.onload = () => { $('messages').scrollTop = 1e9; };
+    img.onclick = () => viewer(src); img.src = src; wrap.appendChild(img);
+  }
+  function addPhotoMsg(who, src, time, me) {
+    const d = document.createElement('div'); d.className = 'msg' + (me ? ' me' : '');
+    const s = document.createElement('small'); s.textContent = who + ' · ' + time;
+    d.appendChild(s); attachImage(d, src); $('messages').appendChild(d);
+    return d;
+  }
+  function onChunk(m) {
+    const id = String(m.id) + ':' + String(m.iid);
+    if (seen.has('p:' + m.iid)) return;
+    let e = incoming[id];
+    if (!e) {
+      if (gone.get('p:' + m.iid) === m.dev) { seen.add('p:' + m.iid); return; }   // deleted before it reached me
+      const total = Number(m.total);
+      if (!(total >= 1 && total <= 40) || Object.keys(incoming).length > 10) return;
+      const wrap = document.createElement('div'); wrap.className = 'msg';
+      const s = document.createElement('small'); const lbl = stamp(m); s.textContent = String(m.n).slice(0, 24) + ' · ' + lbl;
+      const b = document.createElement('span'); wrap.append(s, b); $('messages').appendChild(wrap);
+      e = incoming[id] = { parts: [], got: 0, total, wrap, b, lbl };
+      reg(wrap, { mid: 'p:' + m.iid, dev: m.dev, me: false, who: String(m.n).slice(0, 24), time: lbl });
+      setTimeout(() => { if (incoming[id]) { incoming[id].b.textContent = 'The photo did not arrive completely.'; delete incoming[id]; } }, 45000);
+    }
+    const i = Number(m.idx);
+    if (!(i >= 0 && i < e.total) || e.parts[i] !== undefined) return;
+    if (typeof m.d !== 'string' || m.d.length > CHUNK + 16 || !/^[A-Za-z0-9+/=]*$/.test(m.d)) return;
+    e.parts[i] = m.d; e.got++;
+    e.b.textContent = 'Receiving photo… ' + e.got + '/' + e.total;
+    if (e.got === e.total) { e.b.textContent = ''; const src = 'data:image/jpeg;base64,' + e.parts.join(''); attachImage(e.wrap, src); seen.add('p:' + m.iid); keep({ k: 'photo', who: String(m.n).slice(0, 24), src, time: e.lbl, me: false, mid: 'p:' + m.iid, dev: m.dev }, e.wrap); delete incoming[id];
+      typers.delete(m.id); renderTyping(); queueSeen('p:' + m.iid); setLast('📷 Photo', String(m.n).slice(0, 24)); alertIncoming(String(m.n).slice(0, 24), '📷 Photo'); }
+    $('messages').scrollTop = 1e9;
+  }
+  function shrink(file) {
+    return new Promise((ok, no) => {
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        let max = 900, q = 0.7;
+        for (let t = 0; t < 8; t++) {
+          const sc = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * sc)); c.height = Math.max(1, Math.round(img.height * sc));
+          const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+          const out = c.toDataURL('image/jpeg', q);
+          if (out.length - 23 <= MAX_CHARS) return ok(out);
+          max = Math.round(max * 0.8); q = Math.max(0.4, q - 0.08);
+        }
+        no(new Error('too big'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); no(new Error('bad image')); };
+      img.src = url;
+    });
+  }
+  async function sendPhoto(file) {
+    if (!file || !/^image\//.test(file.type)) return;
+    if (!clients.some(c => c.connected)) { addSys('Not connected yet. Try again in a moment.'); return; }
+    let dataUrl;
+    try { dataUrl = await shrink(file); } catch (_) { addSys('Could not use that image.'); return; }
+    const b = dataUrl.slice(dataUrl.indexOf(',') + 1), total = Math.ceil(b.length / CHUNK);
+    const iid = Math.random().toString(36).slice(2, 10), time = now();
+    const pel = addPhotoMsg(name, dataUrl, time, true);
+    reg(pel, { mid: 'p:' + iid, dev: devId, me: true, who: name, time }); trackMine('p:' + iid, pel);
+    keep({ k: 'photo', who: name, src: dataUrl, time, me: true, mid: 'p:' + iid }, pel); setLast('📷 Photo', 'You');
+    for (let i = 0; i < total; i++) {
+      send({ k: 'img', iid, idx: i, total, d: b.slice(i * CHUNK, (i + 1) * CHUNK), time });
+      if (i % 4 === 3) await sleep(60);
+    }
+  }
+  $('attach').addEventListener('click', () => $('file').click());
+  $('file').addEventListener('change', () => { sendPhoto($('file').files[0]); $('file').value = ''; });
+
+  $('sendForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = $('msg').value.trim();
+    if (!t) return;
+    const time = now();
+    const mid = Math.random().toString(36).slice(2);
+    send({ k: 'msg', t, time, mid });
+    const el = addMsg(name, t, time, true);
+    reg(el, { mid, dev: devId, me: true, who: name, time }); trackMine(mid, el);
+    keep({ k: 'msg', who: name, text: t, time, me: true, mid }, el); setLast(t, 'You');
+    $('msg').value = ''; lastTypingSent = 0;
+  });
+  // Tell the others when I am typing (at most every 2.5 s), and when I stop.
+  $('msg').addEventListener('input', () => {
+    const has = $('msg').value.trim().length > 0, t = Date.now();
+    if (has && t - lastTypingSent > 2500) { lastTypingSent = t; send({ k: 'typing' }, 0); }
+    else if (!has && lastTypingSent) { lastTypingSent = 0; send({ k: 'typing', s: 1 }, 0); }
+  });
+  setInterval(renderTyping, 1000);
+  window.addEventListener('focus', onActive);
+  document.addEventListener('visibilitychange', onActive);
+  paintNotif();
+  $('notifBtn').addEventListener('click', async () => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (_) {}
+      paintNotif();
+      if (Notification.permission === 'granted') addSys('Notifications are on. You will get an alert when a message arrives while this app is in the background.');
+    } else if (Notification.permission === 'denied') addSys('Notifications are blocked. Allow them for this site or app in your browser or phone settings.');
+    else addSys('Notifications are already on.');
+  });
+  window.addEventListener('pagehide', () => {
+    try { endCall(true); } catch (_) {}
+    try { send({ k: 'leave' }, 0); } catch (_) {}
+    try { const v = JSON.parse(localStorage.getItem(lockKey) || 'null'); if (lockKey && v && v.t === myId) localStorage.removeItem(lockKey); } catch (_) {}
+  });
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+
+  // ---- Calls: tap the camera button and the camera (or only the microphone) opens straight away while you wait for the other person. ----
+  const ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] };
+  const doneCalls = new Set(); let call = null, actx = null, wake = null;
+  const noCam = /^(file|content|blob|data|about):$/.test(location.protocol) || window.isSecureContext === false;
+  if (noCam) $('httpsBar').classList.remove('hidden');
+  const callSend = (o) => send({ k: 'call', ...o }, 0);
+  const callState = (t) => { $('callState').textContent = t; };
+  const stopTrack = (t) => { try { t.stop(); } catch (_) {} };
+  const vT = (c) => c.stream.getVideoTracks()[0], aT = (c) => c.stream.getAudioTracks()[0];
+  const getPref = () => { try { return localStorage.getItem('callMode') === 'audio' ? 'audio' : 'video'; } catch (_) { return 'video'; } };
+  const setPref = (m) => { try { localStorage.setItem('callMode', m); } catch (_) {} };
+  const aCons = { echoCancellation: true, noiseSuppression: true };
+  const vCons = (c) => ({ facingMode: { ideal: c.facing || 'user' }, width: { ideal: 640 }, height: { ideal: 480 } });
+  const gum = (cons) => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { const e = new Error('unsupported'); e.name = 'Unsupported'; return Promise.reject(e); }
+    return navigator.mediaDevices.getUserMedia(cons);
+  };
+  function mediaErr(e, what) {
+    const n = (e && e.name) || 'Error';
+    const why = n === 'NotAllowedError' || n === 'PermissionDeniedError' || n === 'SecurityError'
+      ? 'Access is blocked. Tap the lock icon next to the address, set Camera and Microphone to Allow, then reload. In an installed or converted app, also allow Camera and Microphone in the phone settings for that app (a converted app has to grant them itself).'
+      : n === 'NotFoundError' || n === 'DevicesNotFoundError' ? 'No such device was found on this phone or computer.'
+      : n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError' ? 'It is being used by another app or browser tab. Close that and tap Try again.'
+      : n === 'Unsupported' ? 'This browser cannot open the camera here. Use Chrome, Edge, Safari or Firefox over https, not the built-in browser of another app.'
+      : 'It could not be started.';
+    return 'Could not open your ' + (what || 'camera or microphone') + ' (' + n + '). ' + why;
+  }
+  async function permHint() {
+    const out = [];
+    for (const n of ['camera', 'microphone']) { try { out.push(n + ': ' + (await navigator.permissions.query({ name: n })).state); } catch (_) {} }
+    return out.length ? ' Browser permission says ' + out.join(', ') + '.' : '';
+  }
+  function showErr(t) { $('callErrTxt').textContent = t || ''; $('callErr').classList.toggle('hidden', !t); }
+  async function getWake() { try { if (navigator.wakeLock && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch (_) {} }
+  function dropWake() { try { if (wake) wake.release(); } catch (_) {} wake = null; }
+  function beep() {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      [440, 520].forEach((f, i) => {
+        const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.25;
+        o.frequency.value = f; g.gain.value = 0.08; o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.2);
+      });
+    } catch (_) {}
+  }
+  function bindLocal(c) { const lv = $('lv'); lv.srcObject = null; lv.srcObject = c.stream; lv.play().catch(() => {}); }
+  async function syncSenders(c) {
+    try { if (c.aS && aT(c)) await c.aS.replaceTrack(aT(c)); if (c.vS && vT(c)) await c.vS.replaceTrack(vT(c)); } catch (_) {}
+    if (c.peer && c.pc) callSend({ a: 'vid', cid: c.cid, to: c.peer, on: vT(c) ? 1 : 0 });
+  }
+  // Opens what was chosen. Video mode asks for camera and microphone together (one prompt), then each on its own, so one missing device never blocks the call.
+  async function openMedia(c, wantV) {
+    let err = null;
+    const take = (s) => s.getTracks().forEach(t => { if (c.stream.getTracks().some(x => x.kind === t.kind)) stopTrack(t); else c.stream.addTrack(t); });
+    if (wantV && !vT(c) && !aT(c)) { try { take(await gum({ audio: aCons, video: vCons(c) })); } catch (e) { err = e; } }
+    if (wantV && !vT(c)) { try { take(await gum({ video: vCons(c) })); } catch (e) { err = err || e; } }
+    if (!aT(c)) { try { take(await gum({ audio: aCons })); } catch (e) { err = err || e; } }
+    if (call !== c) { c.stream.getTracks().forEach(stopTrack); return; }
+    const lack = [wantV && !vT(c) ? 'camera' : '', !aT(c) ? 'microphone' : ''].filter(Boolean);
+    showErr(lack.length ? mediaErr(err, lack.join(' and ')) + await permHint() : '');
+    if (call !== c) return;
+    await syncSenders(c); bindLocal(c); paintCall();
+  }
+  function paintCall() {
+    const c = call;
+    $('call').classList.toggle('hidden', !c);
+    if (!c) return;
+    const hasV = !!vT(c), a = aT(c), live = c.state === 'live', inc = c.state === 'incoming';
+    $('callWho').textContent = c.who;
+    $('callIn').classList.toggle('hidden', !inc); $('callCtl').classList.toggle('hidden', inc); $('modeSw').classList.toggle('hidden', inc);
+    $('mV').classList.toggle('on', !!c.wantV); $('mA').classList.toggle('on', !c.wantV);
+    const lv = $('lv'); lv.classList.toggle('hidden', !hasV); lv.classList.toggle('full', !live); lv.classList.toggle('back', c.facing === 'environment');
+    $('rOff').classList.toggle('hidden', !(live ? c.rvOff : !hasV));
+    $('avc').textContent = (c.who[0] || '?').toUpperCase(); $('rOffTxt').textContent = live ? 'Camera off' : '';
+    const muted = !a || !a.enabled;
+    $('cMic').classList.toggle('off', muted); $('cMic').textContent = muted ? '\uD83D\uDD07' : '\uD83C\uDFA4';
+    $('cFlip').parentElement.classList.toggle('hidden', !hasV || !(window.matchMedia && matchMedia('(pointer:coarse)').matches));
+  }
+  function startTick(c) {
+    c.t0 = Date.now(); clearInterval(c.tick);
+    const two = (n) => String(n).padStart(2, '0');
+    const upd = () => { if (call !== c) return; const s = Math.floor((Date.now() - c.t0) / 1000); callState(two(Math.floor(s / 60)) + ':' + two(s % 60)); };
+    c.tick = setInterval(upd, 1000); upd();
+  }
+  function endCall(tell) {
+    const c = call; if (!c) return;
+    call = null; doneCalls.add(c.cid);
+    if (tell) { try { callSend(c.peer ? { a: 'hangup', cid: c.cid, to: c.peer } : { a: 'hangup', cid: c.cid }); } catch (_) {} }
+    clearTimeout(c.timer); clearInterval(c.ringT); clearInterval(c.tick); clearTimeout(c.failT);
+    try { if (c.pc) c.pc.close(); } catch (_) {}
+    c.stream.getTracks().forEach(stopTrack); dropWake(); showErr('');
+    $('lv').srcObject = null; $('rv').srcObject = null; paintCall();
+  }
+  async function flushIce(c) {
+    const l = c.pend.splice(0);
+    for (const x of l) { try { await c.pc.addIceCandidate(x); } catch (_) {} }
+  }
+  function makePc(c) {
+    const pc = new RTCPeerConnection(ICE); c.pc = pc; c.rs = new MediaStream(); $('rv').srcObject = c.rs;
+    pc.onicecandidate = (e) => { if (e.candidate && call === c) callSend({ a: 'ice', cid: c.cid, to: c.peer, cand: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }); };
+    pc.ontrack = (e) => { if (!c.rs.getTracks().includes(e.track)) c.rs.addTrack(e.track); const rv = $('rv'); rv.srcObject = c.rs; rv.play().catch(() => {}); };
+    pc.onconnectionstatechange = () => {
+      if (call !== c) return;
+      const s = pc.connectionState;
+      if (s === 'connected') { clearTimeout(c.failT); c.state = 'live'; paintCall(); if (!c.t0) startTick(c); getWake(); }
+      else if (s === 'disconnected') { callState('Reconnecting…'); clearTimeout(c.failT); c.failT = setTimeout(() => { if (call === c && pc.connectionState !== 'connected') { addSys('The video call was lost.'); endCall(true); } }, 8000); }
+      else if (s === 'failed') { addSys('Could not connect the video call. A strict network or a VPN can block direct calls.'); endCall(true); }
+    };
+    return pc;
+  }
+  const armMissed = (c) => { clearTimeout(c.timer); c.timer = setTimeout(() => { if (call === c && c.state === 'incoming') { addSys('Missed video call from ' + c.who); endCall(false); } }, 15000); };
+  async function startCall() {
+    if (call) return;
+    if (noCam) { alert('Video calls cannot use the camera or microphone on this page because it was opened from a file (' + location.protocol + '//) or a non-secure address. Open the app from its https web address instead. Chat still works.'); return; }
+    if (!clients.some(x => x.connected)) { addSys('Not connected yet. Try again in a moment.'); return; }
+    const c = call = { cid: Math.random().toString(36).slice(2, 12), role: 'caller', state: 'ringing', who: room, stream: new MediaStream(), pend: [], wantV: getPref() === 'video', facing: 'user', rvOff: false };
+    paintCall(); callState('Opening ' + (c.wantV ? 'camera' : 'microphone') + '…');
+    await openMedia(c, c.wantV);        // opens right away, inside the tap
+    if (call !== c) return;
+    callState('Waiting for someone to join…'); getWake();
+    const ring = () => callSend({ a: 'ring', cid: c.cid, v: vT(c) ? 1 : 0 });
+    ring(); c.ringT = setInterval(ring, 4000);   // repeated so anyone who opens the chat later still sees the call
+    c.timer = setTimeout(() => { if (call === c && c.state === 'ringing') { addSys('No one joined the video call.'); endCall(true); } }, 600000);
+  }
+  async function acceptCall(wantV) {
+    const c = call; if (!c || c.state !== 'incoming') return;
+    clearInterval(c.ringT); clearTimeout(c.timer);
+    c.wantV = wantV; c.state = 'connecting'; setPref(wantV ? 'video' : 'audio');
+    paintCall(); callState('Opening ' + (wantV ? 'camera' : 'microphone') + '…');
+    await openMedia(c, wantV);
+    if (call !== c) return;
+    callState('Connecting…');
+    callSend({ a: 'accept', cid: c.cid, to: c.peer });
+    c.failT = setTimeout(() => { if (call === c && c.state !== 'live') { addSys('Could not connect the video call.'); endCall(true); } }, 25000);
+  }
+  async function setVideo(on) {
+    const c = call; if (!c || c.switching) return;
+    c.switching = true; setPref(on ? 'video' : 'audio'); c.wantV = on; showErr('');
+    try {
+      if (on) {
+        if (!vT(c)) {
+          try { const t = (await gum({ video: vCons(c) })).getVideoTracks()[0]; c.stream.addTrack(t); }
+          catch (e) { c.wantV = false; showErr(mediaErr(e, 'camera') + await permHint()); }
+        }
+      } else {
+        const t = vT(c); if (t) { c.stream.removeTrack(t); stopTrack(t); }
+        if (c.vS) await c.vS.replaceTrack(null);
+      }
+    } catch (_) {}
+    if (call === c) { await syncSenders(c); bindLocal(c); paintCall(); }
+    c.switching = false;
+  }
+  async function onCall(m) {
+    try {
+      if (m.to && m.to !== myId) return;
+      if (m.ts && Date.now() - m.ts > 45000) return;
+      const who = String(m.n).slice(0, 24), cid = String(m.cid || '').slice(0, 24);
+      if (!cid) return;
+      if (m.a === 'ring') {
+        if (doneCalls.has(cid)) return;
+        if (call) { if (call.cid !== cid) callSend({ a: 'busy', cid, to: m.id }); else if (call.state === 'incoming') armMissed(call); return; }
+        const c = call = { cid, role: 'callee', state: 'incoming', who, peer: m.id, stream: new MediaStream(), pend: [], wantV: !!m.v, facing: 'user', rvOff: false };
+        paintCall(); callState(m.v ? 'Incoming video call…' : 'Incoming voice call…'); beep(); armMissed(c);
+        c.ringT = setInterval(() => { beep(); try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (_) {} }, 2500);
+        if (!isActive()) notify(who, '📹 Incoming ' + (m.v ? 'video' : 'voice') + ' call');
+        return;
+      }
+      const c = call;
+      if (!c || c.cid !== cid || (c.peer && m.id !== c.peer)) return;
+      if (m.a === 'accept' && c.role === 'caller' && c.state === 'ringing') {
+        c.peer = m.id; c.who = who; c.state = 'connecting';
+        clearTimeout(c.timer); clearInterval(c.ringT);
+        callSend({ a: 'taken', cid, by: m.id }); paintCall(); callState('Connecting…');
+        c.failT = setTimeout(() => { if (call === c && c.state !== 'live') { addSys('Could not connect the video call.'); endCall(true); } }, 25000);
+        const pc = makePc(c);
+        const at = pc.addTransceiver(aT(c) || 'audio', { direction: 'sendrecv', streams: [c.stream] });
+        const vt = pc.addTransceiver(vT(c) || 'video', { direction: 'sendrecv', streams: [c.stream] });
+        c.aS = at.sender; c.vS = vt.sender;
+        const o = await pc.createOffer(); await pc.setLocalDescription(o);
+        callSend({ a: 'offer', cid, to: c.peer, sdp: o.sdp, v: vT(c) ? 1 : 0 });
+      } else if (m.a === 'offer' && c.role === 'callee' && c.state === 'connecting' && !c.pc) {
+        if (typeof m.sdp !== 'string' || m.sdp.length > 30000) return;
+        const pc = makePc(c);
+        await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
+        c.rvOff = !m.v;
+        for (const t of pc.getTransceivers()) {
+          const k = t.receiver.track.kind; t.direction = 'sendrecv';
+          if (k === 'video') c.vS = t.sender; else c.aS = t.sender;
+          const mine = k === 'video' ? vT(c) : aT(c);
+          if (mine) await t.sender.replaceTrack(mine);
+        }
+        await flushIce(c);
+        const a = await pc.createAnswer(); await pc.setLocalDescription(a);
+        callSend({ a: 'answer', cid, to: c.peer, sdp: a.sdp, v: vT(c) ? 1 : 0 });
+      } else if (m.a === 'answer' && c.role === 'caller' && c.pc && !c.pc.remoteDescription) {
+        if (typeof m.sdp !== 'string' || m.sdp.length > 30000) return;
+        c.rvOff = !m.v;
+        await c.pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }); await flushIce(c);
+      } else if (m.a === 'vid') { c.rvOff = !m.on; paintCall();
+      } else if (m.a === 'ice' && m.cand && typeof m.cand === 'object') {
+        if (c.pc && c.pc.remoteDescription) c.pc.addIceCandidate(m.cand).catch(() => {}); else if (c.pend.length < 100) c.pend.push(m.cand);
+      } else if (m.a === 'taken') {
+        if (c.role === 'callee' && m.by !== myId && c.state !== 'live') { addSys('The video call was answered by someone else.'); endCall(false); }
+      } else if (m.a === 'hangup') {
+        addSys(c.state === 'incoming' ? 'Missed video call from ' + c.who : 'The video call ended.'); endCall(false);
+      } else if ((m.a === 'decline' || m.a === 'busy') && c.state === 'ringing') {
+        addSys(who + (m.a === 'busy' ? ' is on another call.' : ' declined the video call.'));
+        if (new Set([...online.values()].map(v => v.n)).size <= 1) endCall(true);
+      }
+    } catch (_) { if (call) { addSys('The video call could not be set up.'); endCall(true); } }
+  }
+  $('callBtn').addEventListener('click', startCall);
+  $('cAcceptV').addEventListener('click', () => acceptCall(true));
+  $('cAcceptA').addEventListener('click', () => acceptCall(false));
+  $('cDecline').addEventListener('click', () => { const c = call; if (!c) return; callSend({ a: 'decline', cid: c.cid, to: c.peer }); endCall(false); });
+  $('cEnd').addEventListener('click', () => { const c = call; if (!c) return; addSys(c.state === 'live' ? 'The video call ended.' : 'Video call cancelled.'); endCall(true); });
+  $('mV').addEventListener('click', () => setVideo(true));
+  $('mA').addEventListener('click', () => setVideo(false));
+  $('callRetry').addEventListener('click', () => { const c = call; if (c) { showErr(''); openMedia(c, c.wantV); } });
+  $('call').addEventListener('click', () => { $('rv').play().catch(() => {}); });
+  $('cMic').addEventListener('click', async () => {
+    const c = call; if (!c) return;
+    const t = aT(c);
+    if (t) t.enabled = !t.enabled;
+    else { try { c.stream.addTrack((await gum({ audio: aCons })).getAudioTracks()[0]); showErr(''); await syncSenders(c); } catch (e) { showErr(mediaErr(e, 'microphone') + await permHint()); } }
+    if (call === c) paintCall();
+  });
+  $('cFlip').addEventListener('click', async () => {
+    const c = call; if (!c || !vT(c) || c.flipping) return;
+    c.flipping = true;
+    const old = vT(c), was = c.facing || 'user', next = was === 'user' ? 'environment' : 'user';
+    const grab = async (f) => (await gum({ video: { facingMode: { ideal: f } } })).getVideoTracks()[0];
+    try {
+      c.stream.removeTrack(old); stopTrack(old);
+      let nt, facing = next;
+      try { nt = await grab(next); } catch (_) { nt = await grab(was); facing = was; }
+      c.stream.addTrack(nt); c.facing = facing;
+      await syncSenders(c);
+    } catch (_) { addSys('Could not switch the camera.'); }
+    c.flipping = false; if (call === c) { bindLocal(c); paintCall(); }
+  });
+  // ---- Three-dot menu: relay status, and leave this room to start or join another one ----
+  $('menuBtn').addEventListener('click', (e) => { e.stopPropagation(); $('menu').classList.toggle('hidden'); });
+  document.addEventListener('click', () => { $('menu').classList.add('hidden'); closeMsgMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMsgMenu(); });
+  $('messages').addEventListener('scroll', closeMsgMenu);
+  function leaveRoom() {
+    try { endCall(true); } catch (_) {}
+    try { send({ k: 'leave' }, 0); } catch (_) {}
+    clearInterval(hbTimer); clearInterval(beatTimer); clearTimeout(joinTimer);
+    try { const v = JSON.parse(localStorage.getItem(lockKey) || 'null'); if (lockKey && v && v.t === myId) localStorage.removeItem(lockKey); } catch (_) {}
+    clients.forEach(c => { if (c.removeAllListeners) c.removeAllListeners(); c.end(); });
+    clients = []; shown = false; online.clear();
+    mine.clear(); typers.clear(); pendingSeen.clear(); bubbles.clear(); closeMsgMenu(); unread = 0; renderTyping();
+    $('pass').value = ''; $('err').textContent = ''; status('Not connected', false); show('list');
+  }
+  $('backBtn').onclick = () => { if (!$('chat').classList.contains('hidden')) leaveRoom(); else show(st.rooms.length ? 'list' : 'form'); };
+  $('cancelNew').onclick = () => show(st.rooms.length ? 'list' : 'form');
+  $('addBtn').onclick = () => { $('room').value = ''; $('pass').value = ''; $('err').textContent = ''; $('remember').checked = true; if (st.name) $('name').value = st.name; showPeers(); show('form'); $('room').focus(); };
+  $('newChat').addEventListener('click', () => {
+    const r = room; $('menu').classList.add('hidden');
+    if (!confirm('Remove "' + r + '" from your chat list? Saved history stays on this device.')) return;
+    leaveRoom(); st.rooms = st.rooms.filter(x => x.room !== r); keys.delete(r); saveSettings(st); renderRooms();
+  });
+  // ---- Background: listen to every saved chat so the list shows new messages and unread counts ----
+  const keys = new Map(), bgSeen = new Set(); let bg = [];
+  async function startBg() {
+    if (window.mqttFailed || typeof mqtt === 'undefined' || typeof nacl === 'undefined') return;
+    bg.forEach(c => c.end(true)); bg = [];
+    for (const e of st.rooms) {
+      if (!e.pass) continue;
+      const cur = keys.get(e.room);
+      if (!cur || cur.k !== e.room + '|' + e.pass) { keys.set(e.room, { k: e.room + '|' + e.pass, room: e.room, key: makeKey(e.pass, e.room), topic: 'roomchat-v2/' + hex(nacl.hash(enc.encode('topic:' + e.room))).slice(0, 32) }); await sleep(0); }
+    }
+    const topics = [...keys.values()].map(v => v.topic); if (!topics.length) return;
+    BROKERS.forEach(([label, url]) => {
+      const c = mqtt.connect(url, { clientId: 'rcbg_' + devId + '_' + label, clean: false, protocolVersion: 5, properties: { sessionExpiryInterval: 604800 }, reconnectPeriod: 5000, connectTimeout: 8000 });
+      c.on('connect', () => c.subscribe(topics, { qos: 1 }));
+      c.on('message', bgMsg); c.on('error', () => {});
+      bg.push(c);
+    });
+  }
+  function bgMsg(t, buf) {
+    const v = [...keys.values()].find(x => x.topic === t);
+    if (!v || (shown && topic === t)) return;   // the open chat handles its own messages
+    let m; try { const o = JSON.parse(buf.toString()); m = JSON.parse(dec.decode(nacl.secretbox.open(unb64(o.c), unb64(o.i), v.key))); } catch (_) { return; }
+    if (m.k === 'call' && m.a === 'ring' && m.dev !== devId && m.ts && Date.now() - m.ts < 30000 && !bgSeen.has('c:' + m.cid)) {
+      bgSeen.add('c:' + m.cid);
+      if (!isActive()) notify(v.room, '📹 ' + String(m.n).slice(0, 24) + ' is video calling…', v.room);
+      return;
+    }
+    const id = m.k === 'msg' ? m.mid : (m.k === 'img' && Number(m.idx) === 0) ? 'p:' + m.iid : null;
+    if (!id || m.dev === devId || bgSeen.has(id)) return;
+    bgSeen.add(id); if (bgSeen.size > 1500) bgSeen.delete(bgSeen.values().next().value);
+    const who = String(m.n).slice(0, 24), txt = m.k === 'msg' ? String(m.t).slice(0, 80) : '📷 Photo';
+    st.unread = st.unread || {}; st.unread[v.room] = (st.unread[v.room] || 0) + 1;
+    st.last = st.last || {}; st.last[v.room] = { t: txt, who, ts: Date.now() };
+    saveSettings(st); renderRooms(); updateTitle();
+    if (!isActive()) notify(v.room, who + ': ' + txt, v.room);
+  }
+  show(st.rooms.length ? 'list' : 'form'); startBg();
+})();
+</script>
+</body>
+</html>
